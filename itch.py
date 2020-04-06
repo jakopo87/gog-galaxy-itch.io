@@ -29,10 +29,10 @@ class ItchIntegration(Plugin):
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
         resp = list(self.itch_db_cursor.execute("SELECT * FROM games"))
-        downloaded = [
-            x[0] for x in list(
-                self.itch_db_cursor.execute("SELECT game_id FROM caves"))
-        ]
+        # downloaded = [
+        #     x[0] for x in list(
+        #         self.itch_db_cursor.execute("SELECT game_id FROM caves"))
+        # ]
         self.itch_db.close()
         logging.debug("Closing connection to itch butler.db")
 
@@ -42,11 +42,11 @@ class ItchIntegration(Plugin):
 
         for game in resp:
             logging.debug(f"Building game {game[0]} ({game[2]})")
-            if game[0] not in downloaded:
-                logging.debug(
-                    f"Game {game[0]} ({game[2]}) seems to be only cached, skipping..."
-                )
-                continue
+            # if game[0] not in downloaded:
+            #     logging.debug(
+            #         f"Game {game[0]} ({game[2]}) seems to be only cached, skipping..."
+            #     )
+            #     continue
             can_be_bought = True if game[11] == 1 else False
             min_price = game[10]
             license_type = LicenseType.FreeToPlay
