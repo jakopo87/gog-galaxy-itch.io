@@ -29,7 +29,10 @@ class ItchIntegration(Plugin):
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
         resp = list(self.itch_db_cursor.execute("SELECT * FROM games"))
-        downloaded = [x[0] for x in list(self.itch_db_cursor.execute("SELECT game_id FROM caves"))]
+        downloaded = [
+            x[0] for x in list(
+                self.itch_db_cursor.execute("SELECT game_id FROM caves"))
+        ]
         self.itch_db.close()
         logging.debug("Closing connection to itch butler.db")
 
@@ -40,14 +43,20 @@ class ItchIntegration(Plugin):
         for game in resp:
             logging.debug(f"Building game {game[0]} ({game[2]})")
             if game[0] not in downloaded:
-                logging.debug(f"Game {game[0]} ({game[2]}) seems to be only cached, skipping...")
+                logging.debug(
+                    f"Game {game[0]} ({game[2]}) seems to be only cached, skipping..."
+                )
                 continue
             can_be_bought = True if game[11] == 1 else False
             min_price = game[10]
             license_type = LicenseType.FreeToPlay
             if can_be_bought and min_price > 0:
                 license_type = LicenseType.SinglePurchase
-            games.append(Game(game_id=game[0], game_title=game[2], dlcs=None, license_info=LicenseInfo(license_type)))
+            games.append(
+                Game(game_id=game[0],
+                     game_title=game[2],
+                     dlcs=None,
+                     license_info=LicenseInfo(license_type)))
             logging.debug(f"Built {game[0]} ({game[2]})")
 
         self.game_ids = [x.game_id for x in games]
@@ -57,14 +66,17 @@ class ItchIntegration(Plugin):
         return games
 
     async def get_user_data(self, api_key):
-        resp = await self._session.request("GET", f"https://itch.io/api/1/{api_key}/me")
+        resp = await self._session.request(
+            "GET", f"https://itch.io/api/1/{api_key}/me")
         data = await resp.json()
         self.authenticated = True
         return data.get("user")
 
     async def pass_login_credentials(self, step: str, credentials: Dict[str, str], cookies: List[Dict[str, str]]) -> \
             Union[NextStep, Authentication]:
-        api_key = re.search(r"^http://127\.0\.0\.1:7157/gogg2itchmatcher#access_token=(.+)", credentials["end_uri"])
+        api_key = re.search(
+            r"^http://127\.0\.0\.1:7157/gogg2itchmatcher#access_token=(.+)",
+            credentials["end_uri"])
         key = api_key.group(1)
         log(key)
         self.store_credentials({"access_token": key})
@@ -82,17 +94,20 @@ class ItchIntegration(Plugin):
         for game in games_after:
             if game.game_id not in games_before:
                 self.add_game(game)
-                logging.debug(f"Game {game.game_id} ({game.game_title}) is new, adding to galaxy...")
+                logging.debug(
+                    f"Game {game.game_id} ({game.game_title}) is new, adding to galaxy..."
+                )
 
         for game in games_before:
             if game not in ids_after:
                 self.remove_game(game)
-                logging.debug(f"Game {game} seems to be uninstalled, removing from galaxy...")
+                logging.debug(
+                    f"Game {game} seems to be uninstalled, removing from galaxy..."
+                )
 
         self.checking_for_new_games = False
 
         logging.debug("Finished checking for changes in the itch butler.db")
-
 
     def tick(self) -> None:
         self.create_task(self.check_for_new_games(), "cfng")
@@ -102,29 +117,40 @@ class ItchIntegration(Plugin):
         games = await self.get_games()
         local_games = []
         for game in games:
-            local_games.append(LocalGame(game_id=game.game_id, local_game_state=LocalGameState.Installed))
+            local_games.append(
+                LocalGame(game_id=game.game_id,
+                          local_game_state=LocalGameState.Installed))
 
         return local_games
 
     async def launch_game(self, game_id: str) -> None:
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
-        resp = json.loads(list(self.itch_db_cursor.execute("SELECT verdict FROM caves WHERE game_id=? LIMIT 1", [game_id]))[0][0])
+        resp = json.loads(
+            list(
+                self.itch_db_cursor.execute(
+                    "SELECT verdict FROM caves WHERE game_id=? LIMIT 1",
+                    [game_id]))[0][0])
         self.itch_db.close()
 
         start = int(time.time())
-        proc = await asyncio.create_subprocess_shell(os.path.join(resp["basePath"], resp["candidates"][0]["path"]))
+        proc = await asyncio.create_subprocess_shell(
+            os.path.join(resp["basePath"], resp["candidates"][0]["path"]))
 
-        await proc.communicate() # wait till terminates
+        await proc.communicate()  # wait till terminates
         end = int(time.time())
 
-        session_mins_played = int((end - start) / 60) # secs to mins
-        time_played = (self._get_time_played(game_id) or 0) + session_mins_played
-        game_time = GameTime(game_id=game_id, time_played=time_played, last_played_time=end)
+        session_mins_played = int((end - start) / 60)  # secs to mins
+        time_played = (self._get_time_played(game_id)
+                       or 0) + session_mins_played
+        game_time = GameTime(game_id=game_id,
+                             time_played=time_played,
+                             last_played_time=end)
         self.update_game_time(game_time)
 
         # store updated times
-        self.persistent_cache[self._time_played_key(game_id)] = str(time_played)
+        self.persistent_cache[self._time_played_key(game_id)] = str(
+            time_played)
         self.persistent_cache[self._last_played_time_key(game_id)] = str(end)
         self.push_cache()
 
@@ -137,11 +163,13 @@ class ItchIntegration(Plugin):
 
     def _get_time_played(self, game_id: str) -> Optional[int]:
         key = self._time_played_key(game_id)
-        return int(self.persistent_cache[key]) if key in self.persistent_cache else None
+        return int(self.persistent_cache[key]
+                   ) if key in self.persistent_cache else None
 
     def _get_last_played_time(self, game_id: str) -> Optional[int]:
         key = self._last_played_time_key(game_id)
-        return int(self.persistent_cache[key]) if key in self.persistent_cache else None
+        return int(self.persistent_cache[key]
+                   ) if key in self.persistent_cache else None
 
     @staticmethod
     def _time_played_key(game_id: str) -> str:
@@ -160,8 +188,7 @@ class ItchIntegration(Plugin):
             "0.1",  # Version
             reader,
             writer,
-            token
-        )
+            token)
         self._session = create_client_session()
         self.authenticated = False
 
@@ -174,17 +201,25 @@ class ItchIntegration(Plugin):
 
     # implement methods
     async def authenticate(self, stored_credentials=None):
-        if not (stored_credentials.get("access_token") if stored_credentials else None):
-            return NextStep("web_session", {
-                "window_title": "Log in to Itch.io",
-                "window_width": 536,
-                "window_height": 675,
-                "start_uri": r"https://itch.io/user/oauth?client_id=9a47359f7cba449ace3ba257cfeebc17&scope=profile&response_type=token&redirect_uri=http%3A%2F%2F127.0.0.1%3A7157%2Fgogg2itchmatcher",
-                "end_uri_regex": r"^http://127\.0\.0\.1:7157/gogg2itchmatcher#access_token=.+",
-            })
+        if not (stored_credentials.get("access_token")
+                if stored_credentials else None):
+            return NextStep(
+                "web_session", {
+                    "window_title":
+                    "Log in to Itch.io",
+                    "window_width":
+                    536,
+                    "window_height":
+                    675,
+                    "start_uri":
+                    r"https://itch.io/user/oauth?client_id=9a47359f7cba449ace3ba257cfeebc17&scope=profile&response_type=token&redirect_uri=http%3A%2F%2F127.0.0.1%3A7157%2Fgogg2itchmatcher",
+                    "end_uri_regex":
+                    r"^http://127\.0\.0\.1:7157/gogg2itchmatcher#access_token=.+",
+                })
         else:
             try:
-                user = await self.get_user_data(stored_credentials["access_token"])
+                user = await self.get_user_data(
+                    stored_credentials["access_token"])
 
                 return Authentication(user["id"], user["username"])
             except AccessDenied:
@@ -196,6 +231,7 @@ def main():
 
 
 # run plugin event loop
+
 
 def log(msg):
     return
