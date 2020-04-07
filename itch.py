@@ -8,13 +8,14 @@ import sys
 import time
 import traceback
 import re
+import webbrowser
 from typing import List, Dict, Union, Optional
 
 from galaxy.http import create_client_session
 
 from galaxy.api.errors import AccessDenied, InvalidCredentials, AuthenticationRequired
 from galaxy.api.plugin import Plugin, create_and_run_plugin
-from galaxy.api.consts import Platform, LicenseType, LocalGameState
+from galaxy.api.consts import Platform, LicenseType, LocalGameState, OSCompatibility
 from galaxy.api.types import NextStep, Authentication, LocalGame, Game, LicenseInfo, GameTime
 
 ITCH_DB_PATH = os.path.join(os.getenv("appdata"), "itch/db/butler.db")
@@ -71,6 +72,9 @@ class ItchIntegration(Plugin):
         data = await resp.json()
         self.authenticated = True
         return data.get("user")
+
+    async def get_os_compatibility(self, game_id, context):
+        return OSCompatibility.Windows
 
     async def pass_login_credentials(self, step: str, credentials: Dict[str, str], cookies: List[Dict[str, str]]) -> \
             Union[NextStep, Authentication]:
@@ -180,8 +184,13 @@ class ItchIntegration(Plugin):
     def _last_played_time_key(game_id: str) -> str:
         return f'last{game_id}'
 
-    async def uninstall_game(self, game_id: str) -> None:
-        pass
+    async def install_game(self, game_id):
+        await webbrowser.open(f"itch://games/{game_id}")
+        return
+
+    async def uninstall_game(self, game_id: str):
+        await webbrowser.open(f"itch://games/{game_id}")
+        return
 
     def __init__(self, reader, writer, token):
         super().__init__(
