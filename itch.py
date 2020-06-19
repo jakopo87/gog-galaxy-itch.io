@@ -26,9 +26,11 @@ else:
 
 class ItchIntegration(Plugin):
     async def get_owned_games(self) -> List[Game]:
+        logging.debug("get_owned_games")
         return await self.get_games()
 
     async def get_games(self):
+        logging.debug("get_games")
         logging.debug("Opening connection to itch butler.db")
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
@@ -73,6 +75,8 @@ class ItchIntegration(Plugin):
         return games
 
     async def get_user_data(self, api_key):
+        logging.debug("get_user_data")
+
         resp = await self._session.request(
             "GET", f"https://itch.io/api/1/{api_key}/me")
         data = await resp.json()
@@ -80,6 +84,7 @@ class ItchIntegration(Plugin):
         return data.get("user")
 
     async def get_os_compatibility(self, game_id, context):
+        logging.debug(f"get_os_compatibility {game_id}")
         return OSCompatibility.Windows
 
     async def pass_login_credentials(self, step: str, credentials: Dict[str, str], cookies: List[Dict[str, str]]) -> \
@@ -96,7 +101,7 @@ class ItchIntegration(Plugin):
         return Authentication(user["id"], user["username"])
 
     async def check_for_new_games(self):
-        logging.debug("Checking for changes in the itch butler.db")
+        logging.debug("check_for_new_games")
         self.checking_for_new_games = True
         games_before = self.game_ids[:]
         games_after = await self.get_games()
