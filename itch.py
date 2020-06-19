@@ -118,13 +118,14 @@ class ItchIntegration(Plugin):
     async def get_local_games(self) -> List[LocalGame]:
         # all available games are installed, so we convert the Game list to a LocalGame list
         games = await self.get_games()
-        local_games = []
-        for game in games:
-            local_games.append(
-                LocalGame(game_id=game.game_id,
-                          local_game_state=LocalGameState.Installed))
+        return games
+        # local_games = []
+        # for game in games:
+        #     local_games.append(
+        #         LocalGame(game_id=game.game_id,
+        #                   local_game_state=LocalGameState.Installed))
 
-        return local_games
+        # return local_games
 
     async def launch_game(self, game_id: str) -> None:
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
