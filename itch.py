@@ -19,7 +19,8 @@ from galaxy.api.consts import Platform, LicenseType, LocalGameState, OSCompatibi
 from galaxy.api.types import NextStep, Authentication, LocalGame, Game, LicenseInfo, GameTime
 
 if sys.platform.startswith("darwin"):
-    ITCH_DB_PATH = os.path.expanduser("~/Library/Application Support/itch/db/butler.db")
+    ITCH_DB_PATH = os.path.expanduser(
+        "~/Library/Application Support/itch/db/butler.db")
 else:
     ITCH_DB_PATH = os.path.join(os.getenv("appdata"), "itch/db/butler.db")
 
