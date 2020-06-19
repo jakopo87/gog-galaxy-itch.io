@@ -32,11 +32,18 @@ class ItchIntegration(Plugin):
         logging.debug("Opening connection to itch butler.db")
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
-        resp = list(self.itch_db_cursor.execute("SELECT * FROM games"))
-        # downloaded = [
-        #     x[0] for x in list(
-        #         self.itch_db_cursor.execute("SELECT game_id FROM caves"))
-        # ]
+
+        # Import a game if one of those conditions is satisfied:
+        # - it's a free game;
+        # - user has a download key;
+        sql = """
+            SELECT games.*
+            FROM games
+            LEFT JOIN download_keys
+                ON games.id = download_keys.game_id
+            WHERE games.min_price = 0 OR download_keys.id IS NOT NULL
+        """
+        resp = list(self.itch_db_cursor.execute(sql))
         self.itch_db.close()
         logging.debug("Closing connection to itch butler.db")
 
@@ -46,16 +53,12 @@ class ItchIntegration(Plugin):
 
         for game in resp:
             logging.debug(f"Building game {game[0]} ({game[2]})")
-            # if game[0] not in downloaded:
-            #     logging.debug(
-            #         f"Game {game[0]} ({game[2]}) seems to be only cached, skipping..."
-            #     )
-            #     continue
             can_be_bought = True if game[11] == 1 else False
             min_price = game[10]
             license_type = LicenseType.FreeToPlay
             if can_be_bought and min_price > 0:
                 license_type = LicenseType.SinglePurchase
+
             games.append(
                 Game(game_id=game[0],
                      game_title=game[2],
