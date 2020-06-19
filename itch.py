@@ -123,16 +123,20 @@ class ItchIntegration(Plugin):
         self.create_task(self.check_for_new_games(), "cfng")
 
     async def get_local_games(self) -> List[LocalGame]:
-        # all available games are installed, so we convert the Game list to a LocalGame list
-        games = await self.get_games()
-        return games
-        # local_games = []
-        # for game in games:
-        #     local_games.append(
-        #         LocalGame(game_id=game.game_id,
-        #                   local_game_state=LocalGameState.Installed))
+        logging.debug("get_local_games")
+        self.itch_db = sqlite3.connect(ITCH_DB_PATH)
+        self.itch_db_cursor = self.itch_db.cursor()
 
-        # return local_games
+        installed_games = self.itch_db_cursor.execute("SELECT * FROM caves")
+
+        self.itch_db.close()
+        local_games = []
+        for game in installed_games:
+            local_games.append(
+                LocalGame(game_id=game.game_id,
+                          local_game_state=LocalGameState.Installed))
+
+        return local_games
 
     async def launch_game(self, game_id: str) -> None:
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
