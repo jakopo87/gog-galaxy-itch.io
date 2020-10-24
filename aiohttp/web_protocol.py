@@ -13,6 +13,7 @@ from typing import (
     Awaitable,
     Callable,
     Optional,
+    Tuple,
     Type,
     cast,
 )
@@ -114,7 +115,8 @@ class RequestHandler(BaseProtocol):
                  '_waiter', '_error_handler', '_task_handler',
                  '_upgrade', '_payload_parser', '_request_parser',
                  '_reading_paused', 'logger', 'debug', 'access_log',
-                 'access_logger', '_close', '_force_close')
+                 'access_logger', '_close', '_force_close',
+                 '_current_request')
 
     def __init__(self, manager: 'Server', *,
                  loop: asyncio.AbstractEventLoop,
@@ -128,12 +130,14 @@ class RequestHandler(BaseProtocol):
                  max_line_size: int=8190,
                  max_headers: int=32768,
                  max_field_size: int=8190,
-                 lingering_time: float=10.0):
+                 lingering_time: float=10.0,
+                 read_bufsize: int=2 ** 16):
 
         super().__init__(loop)
 
         self._request_count = 0
         self._keepalive = False
+        self._current_request = None  # type: Optional[BaseRequest]
         self._manager = manager  # type: Optional[Server]
         self._request_handler = manager.request_handler  # type: Optional[_RequestHandler]  # noqa
         self._request_factory = manager.request_factory  # type: Optional[_RequestFactory]  # noqa
@@ -155,7 +159,7 @@ class RequestHandler(BaseProtocol):
         self._upgrade = False
         self._payload_parser = None  # type: Any
         self._request_parser = HttpRequestParser(
-            self, loop,
+            self, loop, read_bufsize,
             max_line_size=max_line_size,
             max_field_size=max_field_size,
             max_headers=max_headers,
@@ -201,6 +205,9 @@ class RequestHandler(BaseProtocol):
                         not self._error_handler.done()):
                     await self._error_handler
 
+                if self._current_request is not None:
+                    self._current_request._cancel(asyncio.CancelledError())
+
                 if (self._task_handler is not None and
                         not self._task_handler.done()):
                     await self._task_handler
@@ -240,11 +247,17 @@ class RequestHandler(BaseProtocol):
         if self._keepalive_handle is not None:
             self._keepalive_handle.cancel()
 
-        if self._task_handler is not None:
-            self._task_handler.cancel()
+        if self._current_request is not None:
+            if exc is None:
+                exc = ConnectionResetError("Connection lost")
+            self._current_request._cancel(exc)
 
         if self._error_handler is not None:
             self._error_handler.cancel()
+        if self._task_handler is not None:
+            self._task_handler.cancel()
+        if self._waiter is not None:
+            self._waiter.cancel()
 
         self._task_handler = None
 
@@ -345,7 +358,7 @@ class RequestHandler(BaseProtocol):
                    response: StreamResponse,
                    time: float) -> None:
         if self.access_logger is not None:
-            self.access_logger.log(request, response, time)
+            self.access_logger.log(request, response, self._loop.time() - time)
 
     def log_debug(self, *args: Any, **kw: Any) -> None:
         if self.debug:
@@ -370,6 +383,37 @@ class RequestHandler(BaseProtocol):
         # reschedule itself to next second
         self._keepalive_handle = self._loop.call_later(
             self.KEEPALIVE_RESCHEDULE_DELAY, self._process_keepalive)
+
+    async def _handle_request(self,
+                              request: BaseRequest,
+                              start_time: float,
+                              ) -> Tuple[StreamResponse, bool]:
+        assert self._request_handler is not None
+        try:
+            try:
+                self._current_request = request
+                resp = await self._request_handler(request)
+            finally:
+                self._current_request = None
+        except HTTPException as exc:
+            resp = Response(status=exc.status,
+                            reason=exc.reason,
+                            text=exc.text,
+                            headers=exc.headers)
+            reset = await self.finish_response(request, resp, start_time)
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError as exc:
+            self.log_debug('Request handler timed out.', exc_info=exc)
+            resp = self.handle_error(request, 504)
+            reset = await self.finish_response(request, resp, start_time)
+        except Exception as exc:
+            resp = self.handle_error(request, 500, exc)
+            reset = await self.finish_response(request, resp, start_time)
+        else:
+            reset = await self.finish_response(request, resp, start_time)
+
+        return resp, reset
 
     async def start(self) -> None:
         """Process incoming request.
@@ -403,8 +447,7 @@ class RequestHandler(BaseProtocol):
 
             message, payload = self._messages.popleft()
 
-            if self.access_log:
-                now = loop.time()
+            start = loop.time()
 
             manager.requests_count += 1
             writer = StreamWriter(self, loop)
@@ -413,63 +456,28 @@ class RequestHandler(BaseProtocol):
             try:
                 # a new task is used for copy context vars (#3406)
                 task = self._loop.create_task(
-                    self._request_handler(request))
+                    self._handle_request(request, start))
                 try:
-                    resp = await task
-                except HTTPException as exc:
-                    resp = exc
+                    resp, reset = await task
                 except (asyncio.CancelledError, ConnectionError):
                     self.log_debug('Ignored premature client disconnection')
                     break
-                except asyncio.TimeoutError as exc:
-                    self.log_debug('Request handler timed out.', exc_info=exc)
-                    resp = self.handle_error(request, 504)
-                except Exception as exc:
-                    resp = self.handle_error(request, 500, exc)
-                else:
-                    # Deprecation warning (See #2415)
-                    if getattr(resp, '__http_exception__', False):
-                        warnings.warn(
-                            "returning HTTPException object is deprecated "
-                            "(#2415) and will be removed, "
-                            "please raise the exception instead",
-                            DeprecationWarning)
+                # Deprecation warning (See #2415)
+                if getattr(resp, '__http_exception__', False):
+                    warnings.warn(
+                        "returning HTTPException object is deprecated "
+                        "(#2415) and will be removed, "
+                        "please raise the exception instead",
+                        DeprecationWarning)
 
                 # Drop the processed task from asyncio.Task.all_tasks() early
                 del task
-
-                if self.debug:
-                    if not isinstance(resp, StreamResponse):
-                        if resp is None:
-                            raise RuntimeError("Missing return "
-                                               "statement on request handler")
-                        else:
-                            raise RuntimeError("Web-handler should return "
-                                               "a response instance, "
-                                               "got {!r}".format(resp))
-                try:
-                    prepare_meth = resp.prepare
-                except AttributeError:
-                    if resp is None:
-                        raise RuntimeError("Missing return "
-                                           "statement on request handler")
-                    else:
-                        raise RuntimeError("Web-handler should return "
-                                           "a response instance, "
-                                           "got {!r}".format(resp))
-                try:
-                    await prepare_meth(request)
-                    await resp.write_eof()
-                except ConnectionError:
+                if reset:
                     self.log_debug('Ignored premature client disconnection 2')
                     break
 
                 # notify server about keep-alive
                 self._keepalive = bool(resp.keep_alive)
-
-                # log access
-                if self.access_log:
-                    self.log_access(request, resp, loop.time() - now)
 
                 # check payload
                 if not payload.is_eof():
@@ -530,6 +538,42 @@ class RequestHandler(BaseProtocol):
             if self.transport is not None and self._error_handler is None:
                 self.transport.close()
 
+    async def finish_response(self,
+                              request: BaseRequest,
+                              resp: StreamResponse,
+                              start_time: float) -> bool:
+        """
+        Prepare the response and write_eof, then log access. This has to
+        be called within the context of any exception so the access logger
+        can get exception information. Returns True if the client disconnects
+        prematurely.
+        """
+        if self._request_parser is not None:
+            self._request_parser.set_upgraded(False)
+            self._upgrade = False
+            if self._message_tail:
+                self._request_parser.feed_data(self._message_tail)
+                self._message_tail = b''
+        try:
+            prepare_meth = resp.prepare
+        except AttributeError:
+            if resp is None:
+                raise RuntimeError("Missing return "
+                                   "statement on request handler")
+            else:
+                raise RuntimeError("Web-handler should return "
+                                   "a response instance, "
+                                   "got {!r}".format(resp))
+        try:
+            await prepare_meth(request)
+            await resp.write_eof()
+        except ConnectionError:
+            self.log_access(request, resp, start_time)
+            return True
+        else:
+            self.log_access(request, resp, start_time)
+            return False
+
     def handle_error(self,
                      request: BaseRequest,
                      status: int=500,
@@ -582,11 +626,13 @@ class RequestHandler(BaseProtocol):
                                  status: int,
                                  exc: Optional[BaseException]=None,
                                  message: Optional[str]=None) -> None:
-        request = BaseRequest(  # type: ignore
+        task = current_task()
+        assert task is not None
+        request = BaseRequest(
             ERROR,
-            EMPTY_PAYLOAD,
+            EMPTY_PAYLOAD,  # type: ignore
             self, writer,
-            current_task(),
+            task,
             self._loop)
 
         resp = self.handle_error(request, status, exc, message)

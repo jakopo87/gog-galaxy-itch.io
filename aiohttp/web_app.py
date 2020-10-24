@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import warnings
-from functools import partial
+from functools import partial, update_wrapper
 from typing import (  # noqa
     TYPE_CHECKING,
     Any,
@@ -44,6 +44,7 @@ from .web_routedef import AbstractRouteDef
 from .web_server import Server
 from .web_urldispatcher import (
     AbstractResource,
+    AbstractRoute,
     Domain,
     MaskDomain,
     MatchedSubAppResource,
@@ -89,7 +90,7 @@ class Application(MutableMapping[str, Any]):
                  logger: logging.Logger=web_logger,
                  router: Optional[UrlDispatcher]=None,
                  middlewares: Iterable[_Middleware]=(),
-                 handler_args: Mapping[str, Any]=None,
+                 handler_args: Optional[Mapping[str, Any]]=None,
                  client_max_size: int=1024**2,
                  loop: Optional[asyncio.AbstractEventLoop]=None,
                  debug: Any=...  # mypy doesn't support ellipsis
@@ -310,8 +311,9 @@ class Application(MutableMapping[str, Any]):
         factory = partial(MatchedSubAppResource, rule, subapp)
         return self._add_subapp(factory, subapp)
 
-    def add_routes(self, routes: Iterable[AbstractRouteDef]) -> None:
-        self.router.add_routes(routes)
+    def add_routes(self,
+                   routes: Iterable[AbstractRouteDef]) -> List[AbstractRoute]:
+        return self.router.add_routes(routes)
 
     @property
     def on_response_prepare(self) -> _RespPrepareSignal:
@@ -451,7 +453,9 @@ class Application(MutableMapping[str, Any]):
                 for app in match_info.apps[::-1]:
                     for m, new_style in app._middlewares_handlers:  # type: ignore  # noqa
                         if new_style:
-                            handler = partial(m, handler=handler)
+                            handler = update_wrapper(
+                                partial(m, handler=handler), handler
+                            )
                         else:
                             handler = await m(app, handler)  # type: ignore
 

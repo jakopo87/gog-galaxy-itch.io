@@ -32,6 +32,7 @@ from . import hdrs
 from .abc import AbstractStreamWriter
 from .helpers import DEBUG, ChainMapProxy, HeadersMixin, reify, sentinel
 from .http_parser import RawRequestMessage
+from .http_writer import HttpVersion
 from .multipart import BodyPartReader, MultipartReader
 from .streams import EmptyStreamReader, StreamReader
 from .typedefs import (
@@ -49,8 +50,8 @@ __all__ = ('BaseRequest', 'FileField', 'Request')
 
 if TYPE_CHECKING:  # pragma: no cover
     from .web_app import Application  # noqa
-    from .web_urldispatcher import UrlMappingMatchInfo  # noqa
     from .web_protocol import RequestHandler  # noqa
+    from .web_urldispatcher import UrlMappingMatchInfo  # noqa
 
 
 @attr.s(frozen=True, slots=True)
@@ -342,7 +343,7 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
         return self._method
 
     @reify
-    def version(self) -> Tuple[int, int]:
+    def version(self) -> HttpVersion:
         """Read only property for getting HTTP version of request.
 
         Returns aiohttp.protocol.HttpVersion instance.
@@ -433,7 +434,7 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
         return self._message.raw_headers
 
     @staticmethod
-    def _http_date(_date_str: str) -> Optional[datetime.datetime]:
+    def _http_date(_date_str: Optional[str]) -> Optional[datetime.datetime]:
         """Process a date string, return a datetime object
         """
         if _date_str is not None:
@@ -479,7 +480,7 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
         A read-only dictionary-like object.
         """
         raw = self.headers.get(hdrs.COOKIE, '')
-        parsed = SimpleCookie(raw)
+        parsed = SimpleCookie(raw)  # type: SimpleCookie[str]
         return MappingProxyType(
             {key: val.value for key, val in parsed.items()})
 
@@ -614,7 +615,13 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
                 field_ct = field.headers.get(hdrs.CONTENT_TYPE)
 
                 if isinstance(field, BodyPartReader):
-                    if field.filename and field_ct:
+                    assert field.name is not None
+
+                    # Note that according to RFC 7578, the Content-Type header
+                    # is optional, even for files, so we can't assume it's
+                    # present.
+                    # https://tools.ietf.org/html/rfc7578#section-4.4
+                    if field.filename:
                         # store file in temp file
                         tmp = tempfile.TemporaryFile()
                         chunk = await field.read_chunk(size=2**16)
@@ -629,6 +636,9 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
                                 )
                             chunk = await field.read_chunk(size=2**16)
                         tmp.seek(0)
+
+                        if field_ct is None:
+                            field_ct = 'application/octet-stream'
 
                         ff = FileField(field.name, field.filename,
                                        cast(io.BufferedReader, tmp),
@@ -669,6 +679,18 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
         self._post = MultiDictProxy(out)
         return self._post
 
+    def get_extra_info(self, name: str, default: Any = None) -> Any:
+        """Extra info from protocol transport"""
+        protocol = self._protocol
+        if protocol is None:
+            return default
+
+        transport = protocol.transport
+        if transport is None:
+            return default
+
+        return transport.get_extra_info(name, default)
+
     def __repr__(self) -> str:
         ascii_encodable_path = self.path.encode('ascii', 'backslashreplace') \
             .decode('ascii')
@@ -683,6 +705,9 @@ class BaseRequest(MutableMapping[str, Any], HeadersMixin):
 
     async def _prepare_hook(self, response: StreamResponse) -> None:
         return
+
+    def _cancel(self, exc: BaseException) -> None:
+        self._payload.set_exception(exc)
 
 
 class Request(BaseRequest):

@@ -176,7 +176,7 @@ class WebSocketResponse(StreamResponse):
         accept_val = base64.b64encode(
             hashlib.sha1(key.encode() + WS_KEY).digest()).decode()
         response_headers = CIMultiDict(  # type: ignore
-            {hdrs.UPGRADE: 'websocket',
+            {hdrs.UPGRADE: 'websocket',  # type: ignore
              hdrs.CONNECTION: 'upgrade',
              hdrs.SEC_WEBSOCKET_ACCEPT: accept_val})
 
@@ -205,8 +205,6 @@ class WebSocketResponse(StreamResponse):
         headers, protocol, compress, notakeover = self._handshake(
             request)
 
-        self._reset_heartbeat()
-
         self.set_status(101)
         self.headers.update(headers)
         self.force_close()
@@ -224,10 +222,13 @@ class WebSocketResponse(StreamResponse):
                     protocol: str, writer: WebSocketWriter) -> None:
         self._ws_protocol = protocol
         self._writer = writer
+
+        self._reset_heartbeat()
+
         loop = self._loop
         assert loop is not None
         self._reader = FlowControlDataQueue(
-            request._protocol, limit=2 ** 16, loop=loop)
+            request._protocol, 2 ** 16, loop=loop)
         request.protocol.set_parser(WebSocketReader(
             self._reader, self._max_msg_size, compress=self._compress))
         # disable HTTP keepalive for WebSocket
@@ -454,3 +455,7 @@ class WebSocketResponse(StreamResponse):
                         WSMsgType.CLOSED):
             raise StopAsyncIteration  # NOQA
         return msg
+
+    def _cancel(self, exc: BaseException) -> None:
+        if self._reader is not None:
+            self._reader.set_exception(exc)
