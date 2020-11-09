@@ -75,58 +75,32 @@ class ItchIntegration(Plugin):
 
         return games
 
-    async def get_user_data(self, api_key):
+    async def get_user_data(self):
         logging.debug("get_user_data")
 
-        resp = await self._session.request(
-            "GET", f"https://itch.io/api/1/{api_key}/me")
-        data = await resp.json()
-        self.authenticated = True
-        return data.get("user")
+        self.itch_db = sqlite3.connect(ITCH_DB_PATH)
+        self.itch_db.row_factory = sqlite3.Row
+        self.itch_db_cursor = self.itch_db.cursor()
+
+        sql = """
+            SELECT *
+            FROM users u
+            INNER JOIN profiles p  ON u.id =p.user_id
+            order by u.id
+            LIMIT 1
+        """
+        user = self.itch_db_cursor.execute(sql).fetchone()
+        logging.debug(user)
+        self.itch_db.close()
+        return user
 
     async def get_os_compatibility(self, game_id, context):
         logging.debug(f"get_os_compatibility {game_id}")
         return OSCompatibility.Windows
 
-    async def pass_login_credentials(self, step: str, credentials: Dict[str, str], cookies: List[Dict[str, str]]) -> \
-            Union[NextStep, Authentication]:
-        api_key = re.search(
-            r"^http://127\.0\.0\.1:7157/gogg2itchmatcher#access_token=(.+)",
-            credentials["end_uri"])
-        key = api_key.group(1)
-        log(key)
-        self.store_credentials({"access_token": key})
-
-        user = await self.get_user_data(key)
-
+    async def pass_login_credentials(self, step: str, credentials: Dict[str, str], cookies: List[Dict[str, str]]):
+        user = await self.get_user_data()
         return Authentication(user["id"], user["username"])
-
-    async def check_for_new_games(self):
-        logging.debug("check_for_new_games")
-        self.checking_for_new_games = True
-        games_before = self.game_ids[:]
-        games_after = await self.get_games()
-        ids_after = [x.game_id for x in games_after]
-        for game in games_after:
-            if game.game_id not in games_before:
-                self.add_game(game)
-                logging.debug(
-                    f"Game {game.game_id} ({game.game_title}) is new, adding to galaxy..."
-                )
-
-        for game in games_before:
-            if game not in ids_after:
-                self.remove_game(game)
-                logging.debug(
-                    f"Game {game} seems to be uninstalled, removing from galaxy..."
-                )
-
-        self.checking_for_new_games = False
-
-        logging.debug("Finished checking for changes in the itch butler.db")
-
-    def tick(self) -> None:
-        self.create_task(self.check_for_new_games(), "cfng")
 
     async def get_local_games(self) -> List[LocalGame]:
         logging.debug("get_local_games")
@@ -216,7 +190,6 @@ class ItchIntegration(Plugin):
             writer,
             token)
         self._session = create_client_session()
-        self.authenticated = False
 
         self.itch_db = None
         self.itch_db_cursor = None
@@ -227,29 +200,8 @@ class ItchIntegration(Plugin):
 
     # implement methods
     async def authenticate(self, stored_credentials=None):
-        if not (stored_credentials.get("access_token")
-                if stored_credentials else None):
-            return NextStep(
-                "web_session", {
-                    "window_title":
-                    "Log in to Itch.io",
-                    "window_width":
-                    536,
-                    "window_height":
-                    675,
-                    "start_uri":
-                    r"https://itch.io/user/oauth?client_id=9a47359f7cba449ace3ba257cfeebc17&scope=profile&response_type=token&redirect_uri=http%3A%2F%2F127.0.0.1%3A7157%2Fgogg2itchmatcher",
-                    "end_uri_regex":
-                    r"^http://127\.0\.0\.1:7157/gogg2itchmatcher#access_token=.+",
-                })
-        else:
-            try:
-                user = await self.get_user_data(
-                    stored_credentials["access_token"])
-
-                return Authentication(user["id"], user["username"])
-            except AccessDenied:
-                raise InvalidCredentials()
+        user = await self.get_user_data()
+        return Authentication(user["id"], user["username"])
 
 
 def main():
