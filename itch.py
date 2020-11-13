@@ -37,14 +37,15 @@ class ItchIntegration(Plugin):
         self.itch_db_cursor = self.itch_db.cursor()
 
         # Import a game if one of those conditions is satisfied:
-        # - it's a free game;
-        # - user has a download key;
+        # - it's a free game in a collection;
+        # - has a download key;
         sql = """
             SELECT games.*
             FROM games
-            LEFT JOIN download_keys
-                ON games.id = download_keys.game_id
-            WHERE games.min_price = 0 OR download_keys.id IS NOT NULL
+            LEFT JOIN download_keys dk ON games.id = dk.game_id
+            LEFT JOIN collection_games cg ON games.id = cg.game_id
+            WHERE (cg.collection_id IS NOT NULL)
+                OR (dk.id IS NOT NULL)
         """
         resp = list(self.itch_db_cursor.execute(sql))
         self.itch_db.close()
