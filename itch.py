@@ -44,7 +44,7 @@ class ItchIntegration(Plugin):
             FROM games
             LEFT JOIN download_keys dk ON games.id = dk.game_id
             LEFT JOIN collection_games cg ON games.id = cg.game_id
-            WHERE (cg.collection_id IS NOT NULL)
+            WHERE (cg.collection_id IS NOT NULL AND games.min_price=0)
                 OR (dk.id IS NOT NULL)
         """
         resp = list(self.itch_db_cursor.execute(sql))
