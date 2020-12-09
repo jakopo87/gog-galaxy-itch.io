@@ -108,14 +108,27 @@ class ItchIntegration(Plugin):
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
 
-        installed_games = self.itch_db_cursor.execute("SELECT * FROM caves")
+        installed_games = list(
+            self.itch_db_cursor.execute("SELECT game_id, verdict FROM caves"))
 
         self.itch_db.close()
         local_games = []
         for game in installed_games:
+
+            game_id = game[0]
+            game_data = json.loads(game[1])
+
+            if not game_data["candidates"] or len(game_data["candidates"]) == 0:
+                continue
+
+            exe_path = os.path.join(
+                game_data["basePath"], game_data["candidates"][0]["path"])
+
+            if not os.path.exists(exe_path):
+                continue
+
             local_games.append(
-                LocalGame(game_id=game.game_id,
-                          local_game_state=LocalGameState.Installed))
+                LocalGame(game_id=game_id, local_game_state=LocalGameState.Installed))
 
         return local_games
 
