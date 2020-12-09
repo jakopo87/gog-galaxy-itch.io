@@ -1,5 +1,6 @@
 import asyncio
 import json
+from json import loads
 import logging
 import os
 import sqlite3
@@ -104,7 +105,6 @@ class ItchIntegration(Plugin):
         return Authentication(user["id"], user["username"])
 
     async def get_local_games(self) -> List[LocalGame]:
-        logging.debug("get_local_games")
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
 
@@ -116,13 +116,12 @@ class ItchIntegration(Plugin):
         for game in installed_games:
 
             game_id = game[0]
-            game_data = json.loads(game[1])
+            game_json = game[1]
 
-            if not game_data["candidates"] or len(game_data["candidates"]) == 0:
+            if not game_json["candidates"] or len(game_json["candidates"]) == 0:
                 continue
 
-            exe_path = os.path.join(
-                game_data["basePath"], game_data["candidates"][0]["path"])
+            exe_path = self.__exe_from_json(game_json)
 
             if not os.path.exists(exe_path):
                 continue
@@ -132,19 +131,23 @@ class ItchIntegration(Plugin):
 
         return local_games
 
+    @staticmethod
+    def __exe_from_json(json):
+        data = json.loads(json)
+        return os.path.join(data["basePath"], data["candidates"][0]["path"])
+
     async def launch_game(self, game_id: str) -> None:
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
-        resp = json.loads(
-            list(
-                self.itch_db_cursor.execute(
-                    "SELECT verdict FROM caves WHERE game_id=? LIMIT 1",
-                    [game_id]))[0][0])
+        json = self.itch_db_cursor.execute(
+            "SELECT verdict FROM caves WHERE game_id=? LIMIT 1",
+            [game_id]).fetchone()[0]
         self.itch_db.close()
 
+        exe_path = self.__exe_from_json(json)
         start = int(time.time())
         proc = await asyncio.create_subprocess_shell(
-            os.path.join(resp["basePath"], resp["candidates"][0]["path"]))
+            exe_path)
 
         await proc.communicate()  # wait till terminates
         end = int(time.time())
