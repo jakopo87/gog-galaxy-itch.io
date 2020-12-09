@@ -223,15 +223,6 @@ def main():
 
 
 # run plugin event loop
-
-
-def log(msg):
-    return
-    log = open(os.path.join(os.path.dirname(__file__), "log2.txt"), "a")
-    log.write(str(msg) + "\n")
-    log.close()
-
-
 if __name__ == "__main__":
     log = open(os.path.join(os.path.dirname(__file__), "log.txt"), "w")
     try:
