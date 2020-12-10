@@ -129,14 +129,8 @@ class ItchIntegration(Plugin):
             return os.path.join(data["basePath"], data["candidates"][0]["path"])
 
     async def launch_game(self, game_id: str) -> None:
-        self.itch_db = sqlite3.connect(ITCH_DB_PATH)
-        self.itch_db_cursor = self.itch_db.cursor()
-        json = self.itch_db_cursor.execute(
-            "SELECT verdict FROM caves WHERE game_id=? LIMIT 1",
-            [game_id]).fetchone()[0]
-        self.itch_db.close()
-
-        exe_path = self.__exe_from_json(json)
+        logging.debug(self.__local_games)
+        exe_path = self.__local_games[game_id].path
         start = int(time.time())
         proc = await asyncio.create_subprocess_shell(
             exe_path)
