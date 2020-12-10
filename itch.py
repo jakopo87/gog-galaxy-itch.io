@@ -63,6 +63,8 @@ class ItchIntegration(Plugin):
             license_type = LicenseType.FreeToPlay
             if can_be_bought and min_price > 0:
                 license_type = LicenseType.SinglePurchase
+            else:
+                license_type = LicenseType.FreeToPlay
 
             games.append(
                 Game(game_id=game[0],
