@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -24,11 +25,6 @@ else:
 
 class ItchIntegration(Plugin):
     async def get_owned_games(self) -> List[Game]:
-        logging.debug("get_owned_games")
-        return await self.get_games()
-
-    async def get_games(self):
-        logging.debug("get_games")
         logging.debug("Opening connection to itch butler.db")
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
@@ -48,32 +44,27 @@ class ItchIntegration(Plugin):
         self.itch_db.close()
         logging.debug("Closing connection to itch butler.db")
 
-        games = []
+        for row in resp:
+            id = row[0]
+            title = row[2]
+            can_be_bought = True if row[11] == 1 else False
+            min_price = row[10]
 
-        logging.debug("Starting building games...")
-
-        for game in resp:
-            logging.debug(f"Building game {game[0]} ({game[2]})")
-            can_be_bought = True if game[11] == 1 else False
-            min_price = game[10]
+            logging.debug(f"get_owned_games {id} ({title})")
             license_type = LicenseType.FreeToPlay
             if can_be_bought and min_price > 0:
                 license_type = LicenseType.SinglePurchase
             else:
                 license_type = LicenseType.FreeToPlay
 
-            games.append(
-                Game(game_id=game[0],
-                     game_title=game[2],
-                     dlcs=None,
-                     license_info=LicenseInfo(license_type)))
-            logging.debug(f"Built {game[0]} ({game[2]})")
+            self.__owned_games[id] = Game(
+                game_id=id, game_title=title, dlcs=None, license_info=LicenseInfo(license_type))
 
-        self.game_ids = [x.game_id for x in games]
+            logging.debug(f"Built {id} ({title})")
 
         logging.debug("Finished building games")
 
-        return games
+        return list(self.__owned_games.values())
 
     async def get_user_data(self):
         logging.debug("get_user_data")
@@ -110,24 +101,23 @@ class ItchIntegration(Plugin):
             self.itch_db_cursor.execute("SELECT game_id, verdict FROM caves"))
 
         self.itch_db.close()
-        local_games = []
         for game in installed_games:
-
             game_id = game[0]
             game_json = game[1]
-
-            if not game_json["candidates"] or len(game_json["candidates"]) == 0:
-                continue
 
             exe_path = self.__exe_from_json(game_json)
 
             if not exe_path or not os.path.exists(exe_path):
                 continue
 
-            local_games.append(
-                LocalGame(game_id=game_id, local_game_state=LocalGameState.Installed))
+            self.__local_games[str(game_id)] = ItchLocalGame(
+                game_id=game_id,
+                path=exe_path,
+                local_game_state=LocalGameState.Installed
+            )
+            logging.debug(f"get_local_games {game_id}")
 
-        return local_games
+        return [game.toGalaxyLocalGame() for game in self.__local_games.values()]
 
     @staticmethod
     def __exe_from_json(json_string):
@@ -213,9 +203,8 @@ class ItchIntegration(Plugin):
         self.itch_db = None
         self.itch_db_cursor = None
 
-        self.checking_for_new_games = False
-
-        self.game_ids = []
+        self.__owned_games: Dict[str, Game] = {}
+        self.__local_games: Dict[str, ItchLocalGame] = {}
 
     # implement methods
     async def authenticate(self, stored_credentials=None):
