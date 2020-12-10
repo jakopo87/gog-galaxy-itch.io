@@ -1,23 +1,19 @@
 import asyncio
 import json
-from json import loads
 import logging
 import os
 import sqlite3
-import subprocess
 import sys
 import time
 import traceback
-import re
 import webbrowser
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Optional
 
 from galaxy.http import create_client_session
 
-from galaxy.api.errors import AccessDenied, InvalidCredentials, AuthenticationRequired
 from galaxy.api.plugin import Plugin, create_and_run_plugin
 from galaxy.api.consts import Platform, LicenseType, LocalGameState, OSCompatibility
-from galaxy.api.types import NextStep, Authentication, LocalGame, Game, LicenseInfo, GameTime
+from galaxy.api.types import Authentication, LocalGame, Game, LicenseInfo, GameTime
 
 if sys.platform.startswith("darwin"):
     ITCH_DB_PATH = os.path.expanduser(
