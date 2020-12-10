@@ -223,6 +223,17 @@ class ItchIntegration(Plugin):
         return Authentication(user["id"], user["username"])
 
 
+@dataclass
+class ItchLocalGame(LocalGame):
+    path: str
+
+    def toGalaxyLocalGame(self) -> LocalGame:
+        return LocalGame(
+            game_id=self.game_id,
+            local_game_state=self.local_game_state
+        )
+
+
 def main():
     create_and_run_plugin(ItchIntegration, sys.argv)
 
