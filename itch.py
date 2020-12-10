@@ -123,7 +123,7 @@ class ItchIntegration(Plugin):
 
             exe_path = self.__exe_from_json(game_json)
 
-            if not os.path.exists(exe_path):
+            if not exe_path or not os.path.exists(exe_path):
                 continue
 
             local_games.append(
@@ -132,9 +132,13 @@ class ItchIntegration(Plugin):
         return local_games
 
     @staticmethod
-    def __exe_from_json(json):
-        data = json.loads(json)
-        return os.path.join(data["basePath"], data["candidates"][0]["path"])
+    def __exe_from_json(json_string):
+        data = json.loads(json_string)
+
+        if not data["candidates"] or len(data["candidates"]) == 0:
+            return None
+        else:
+            return os.path.join(data["basePath"], data["candidates"][0]["path"])
 
     async def launch_game(self, game_id: str) -> None:
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
