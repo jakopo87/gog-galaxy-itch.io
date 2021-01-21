@@ -6,11 +6,8 @@ import os
 import sqlite3
 import sys
 import time
-import traceback
 import webbrowser
 from typing import List, Dict, Optional
-
-from galaxy.http import create_client_session
 
 from galaxy.api.plugin import Plugin, create_and_run_plugin
 from galaxy.api.consts import Platform, LicenseType, LocalGameState, OSCompatibility
@@ -252,10 +249,4 @@ def main():
 
 # run plugin event loop
 if __name__ == "__main__":
-    log = open(os.path.join(os.path.dirname(__file__), "log.txt"), "w")
-    try:
         main()
-    except:
-        traceback.print_exc(file=log)
-    finally:
-        log.close()
