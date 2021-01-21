@@ -20,11 +20,19 @@ if sys.platform.startswith("darwin"):
     ITCH_DB_PATH = os.path.expanduser(
         "~/Library/Application Support/itch/db/butler.db")
 else:
-    ITCH_DB_PATH = os.path.join(os.getenv("appdata"), "itch/db/butler.db")
+GET_OWNED_GAMES_TASK = "GET_OWNED_GAMES_TASK"
+GET_OWNED_GAMES_LAST_CHECK = "GET_OWNED_GAMES_LAST_CHECK"
+GET_OWNED_GAMES_WAIT_TIME = float(24 * 3600)
+
+GET_LOCAL_GAMES_TASK = "GET_LOCAL_GAMES_TASK"
+GET_LOCAL_GAMES_LAST_CHECK = "GET_LOCAL_GAMES_LAST_CHECK"
+GET_LOCAL_GAMES_WAIT_TIME = float(1 * 3600)
 
 
 class ItchIntegration(Plugin):
     async def get_owned_games(self) -> List[Game]:
+        self.__running_task[GET_OWNED_GAMES_TASK] = True
+
         logging.debug("Opening connection to itch butler.db")
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
@@ -64,6 +72,9 @@ class ItchIntegration(Plugin):
 
         logging.debug("Finished building games")
 
+        self.persistent_cache[GET_OWNED_GAMES_LAST_CHECK] = time.time()
+        self.__running_task[GET_OWNED_GAMES_TASK] = False
+
         return list(self.__owned_games.values())
 
     async def get_user_data(self):
@@ -89,11 +100,13 @@ class ItchIntegration(Plugin):
         logging.debug(f"get_os_compatibility {game_id}")
         return OSCompatibility.Windows
 
-    async def pass_login_credentials(self, step: str, credentials: Dict[str, str], cookies: List[Dict[str, str]]):
+    async def pass_login_credentials(self):
         user = await self.get_user_data()
         return Authentication(user["id"], user["username"])
 
     async def get_local_games(self) -> List[LocalGame]:
+        self.__running_task[GET_LOCAL_GAMES_TASK] = True
+
         self.itch_db = sqlite3.connect(ITCH_DB_PATH)
         self.itch_db_cursor = self.itch_db.cursor()
 
@@ -117,7 +130,13 @@ class ItchIntegration(Plugin):
             )
             logging.debug(f"get_local_games {game_id}")
 
-        return [game.toGalaxyLocalGame() for game in self.__local_games.values()]
+        local_games = [game.toGalaxyLocalGame()
+                       for game in self.__local_games.values()]
+
+        self.persistent_cache[GET_LOCAL_GAMES_LAST_CHECK] = time.time()
+        self.__running_task[GET_LOCAL_GAMES_TASK] = False
+
+        return local_games
 
     @staticmethod
     def __exe_from_json(json_string):
@@ -192,18 +211,28 @@ class ItchIntegration(Plugin):
             reader,
             writer,
             token)
-        self._session = create_client_session()
 
         self.itch_db = None
         self.itch_db_cursor = None
 
         self.__owned_games: Dict[str, Game] = {}
         self.__local_games: Dict[str, ItchLocalGame] = {}
+        self.__running_task = {
+            GET_OWNED_GAMES_TASK: False,
+            GET_LOCAL_GAMES_TASK: False,
+        }
 
-    # implement methods
     async def authenticate(self, stored_credentials=None):
         user = await self.get_user_data()
         return Authentication(user["id"], user["username"])
+
+    def tick(self) -> None:
+        now = time.time()
+        if (not self.__running_task[GET_OWNED_GAMES_TASK]) and (now - float(self.persistent_cache[GET_OWNED_GAMES_LAST_CHECK]) > GET_OWNED_GAMES_WAIT_TIME):
+            self.create_task(self.get_owned_games(), "Check owned games")
+
+        if (not self.__running_task[GET_LOCAL_GAMES_TASK]) and (now - float(self.persistent_cache[GET_LOCAL_GAMES_LAST_CHECK]) > GET_LOCAL_GAMES_WAIT_TIME):
+            self.create_task(self.get_local_games(), "Check installed games")
 
 
 @dataclass
