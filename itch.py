@@ -14,9 +14,12 @@ from galaxy.api.consts import Platform, LicenseType, LocalGameState, OSCompatibi
 from galaxy.api.types import Authentication, LocalGame, Game, LicenseInfo, GameTime
 
 if sys.platform.startswith("darwin"):
-    ITCH_DB_PATH = os.path.expanduser(
-        "~/Library/Application Support/itch/db/butler.db")
+    ITCH_DB_BASE_PATH = os.path.expanduser(
+        "~/Library/Application Support/itch/db")
 else:
+    ITCH_DB_BASE_PATH = os.path.join(os.getenv("appdata"), "itch/db")
+ITCH_DB_PATH = ITCH_DB_BASE_PATH + "/butler.db"
+
 GET_OWNED_GAMES_TASK = "GET_OWNED_GAMES_TASK"
 GET_OWNED_GAMES_LAST_CHECK = "GET_OWNED_GAMES_LAST_CHECK"
 GET_OWNED_GAMES_WAIT_TIME = float(24 * 3600)
@@ -249,4 +252,4 @@ def main():
 
 # run plugin event loop
 if __name__ == "__main__":
-        main()
+    main()
